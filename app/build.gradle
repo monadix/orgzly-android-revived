@@ -61,6 +61,10 @@ android {
         }
 
         debug {
+            // Keep temporary development builds installable alongside the released app.
+            applicationIdSuffix ".debug"
+            resValue "string", "application_id", "com.orgzlyrevived.debug"
+
             buildConfigField "boolean", "LOG_DEBUG", "true"
 
             buildConfigField "String", "DROPBOX_REFRESH_TOKEN", gradle.ext.appProperties.getProperty("dropbox.refresh_token", '""')
