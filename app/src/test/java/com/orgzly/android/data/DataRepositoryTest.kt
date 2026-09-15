@@ -5,12 +5,17 @@ import androidx.test.core.app.ApplicationProvider
 import com.orgzly.android.LocalStorage
 import com.orgzly.android.db.OrgzlyDatabase
 import com.orgzly.android.repos.RepoFactory
+import com.orgzly.android.ui.NotePlace
+import com.orgzly.android.ui.note.NotePayload
+import com.orgzly.android.ui.views.style.IdLinkSpan
+import com.orgzly.org.OrgProperties
 import org.hamcrest.CoreMatchers.containsString
 import org.hamcrest.CoreMatchers.`is`
 import org.hamcrest.MatcherAssert.assertThat
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -99,6 +104,45 @@ class DataRepositoryTest {
         // ".." without "/" should be allowed (edge case)
         val book = dataRepository.createBook("file..name")
         assertThat(book.book.name, `is`("file..name"))
+    }
+
+    @Test
+    fun getOrCreateNoteIdPersistsANewIdAndReusesIt() {
+        val book = dataRepository.createBook("id-target")
+        val note = dataRepository.createNote(
+            NotePayload("Target"),
+            NotePlace(book.book.id)
+        )
+
+        val createdId = dataRepository.getOrCreateNoteId(note.id)
+
+        assertTrue(createdId?.isNotBlank() == true)
+        assertEquals(
+            createdId,
+            dataRepository.getNoteProperties(note.id)
+                .first { it.name == IdLinkSpan.PROPERTY }
+                .value
+        )
+        assertEquals(createdId, dataRepository.getOrCreateNoteId(note.id))
+    }
+
+    @Test
+    fun getOrCreateNoteIdReusesAnExistingId() {
+        val book = dataRepository.createBook("existing-id-target")
+        val note = dataRepository.createNote(
+            NotePayload(
+                title = "Target",
+                properties = OrgProperties().apply { put(IdLinkSpan.PROPERTY, "kept-id") }
+            ),
+            NotePlace(book.book.id)
+        )
+
+        assertEquals("kept-id", dataRepository.getOrCreateNoteId(note.id))
+        assertEquals(
+            1,
+            dataRepository.getNoteProperties(note.id)
+                .count { it.name == IdLinkSpan.PROPERTY }
+        )
     }
 
     // ===== Tests for renameBook() path traversal validation =====
