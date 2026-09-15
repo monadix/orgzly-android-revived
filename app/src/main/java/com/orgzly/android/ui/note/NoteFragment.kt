@@ -475,6 +475,12 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
     private fun openLinkTargetPicker() {
         linkInsertionPoint = captureLinkInsertionPoint()
+
+        // The editor can still own the IME while the picker dialog is being attached.
+        // End that session first; the picker requests focus for its search field once its
+        // own window is ready.
+        KeyboardUtils.closeSoftKeyboard(activity)
+
         LinkTargetPickerFragment().show(
             childFragmentManager,
             LinkTargetPickerFragment.FRAGMENT_TAG
