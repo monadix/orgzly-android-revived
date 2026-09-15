@@ -17,7 +17,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.orgzly.R
 import com.orgzly.android.App
 import com.orgzly.android.data.DataRepository
-import com.orgzly.android.ui.util.KeyboardUtils
 import com.orgzly.databinding.DialogLinkTargetPickerBinding
 import javax.inject.Inject
 
@@ -110,7 +109,20 @@ class LinkTargetPickerFragment : DialogFragment() {
 
     override fun onStart() {
         super.onStart()
-        requireDialog().window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+
+        requireDialog().window?.apply {
+            // The dialog was shown before DialogFragment attaches this view. AlertDialog therefore
+            // did not see the search editor when it chose its IME flags.
+            clearFlags(
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+            )
+            setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
+        }
+        binding.dialogLinkTargetSearch.requestFocus()
     }
 
     override fun onResume() {
@@ -122,9 +134,6 @@ class LinkTargetPickerFragment : DialogFragment() {
             if (height > width) ViewGroup.LayoutParams.MATCH_PARENT else (width * 0.90).toInt(),
             if (height > width) (height * 0.90).toInt() else ViewGroup.LayoutParams.MATCH_PARENT
         )
-        binding.dialogLinkTargetSearch.post {
-            KeyboardUtils.openSoftKeyboard(binding.dialogLinkTargetSearch)
-        }
     }
 
     companion object {
