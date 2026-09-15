@@ -4,6 +4,10 @@ permissions:
   contents: read
   
 on:
+  # Temporary fork-only device build. This branch is never part of the feature PR.
+  push:
+    branches:
+      - 'ci/fuzzy-link-device-build'
   pull_request:
     branches:
       - 'master'
@@ -39,6 +43,13 @@ jobs:
 
       - name: Gradle build Fdroid
         run: ./gradlew assembleFdroidDebug
+
+      - name: Upload F-Droid debug APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orgzly-revived-fdroid-debug-${{ github.sha }}
+          path: app/build/outputs/apk/fdroid/debug/*.apk
+          if-no-files-found: error
 
       - name: Gradle test Fdroid
         run: ./gradlew testFdroidDebugUnitTest
