@@ -48,6 +48,8 @@ import com.orgzly.android.ui.dialogs.TimestampDialogFragment
 import com.orgzly.android.ui.drawer.DrawerItem
 import com.orgzly.android.ui.main.MainActivity
 import com.orgzly.android.ui.main.SharedMainActivityViewModel
+import com.orgzly.android.ui.note.links.IdLinkFormatter
+import com.orgzly.android.ui.note.links.LinkTargetPickerFragment
 import com.orgzly.android.ui.notes.book.BookFragment
 import com.orgzly.android.ui.settings.SettingsActivity
 import com.orgzly.android.ui.share.ShareActivity
@@ -61,6 +63,7 @@ import com.orgzly.android.ui.util.invisibleIf
 import com.orgzly.android.ui.util.invisibleUnless
 import com.orgzly.android.ui.views.richtext.RichText
 import com.orgzly.android.ui.views.richtext.RichTextEdit
+import com.orgzly.android.ui.views.style.IdLinkSpan
 import com.orgzly.android.util.LogUtils
 import com.orgzly.android.util.OrgFormatter
 import com.orgzly.android.util.SpaceTokenizer
@@ -92,6 +95,10 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
     private var dialog: AlertDialog? = null
 
     private lateinit var sharedMainActivityViewModel: SharedMainActivityViewModel
+
+    private data class LinkInsertionPoint(val viewId: Int, val start: Int, val end: Int)
+
+    private var linkInsertionPoint: LinkInsertionPoint? = null
 
     private val userCancelBackPressHandler = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
@@ -150,6 +157,18 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
         val noteInitialData = noteInitialDataFromArguments()
 
+        linkInsertionPoint = savedInstanceState?.let {
+            if (it.containsKey(STATE_LINK_INSERTION_VIEW_ID)) {
+                LinkInsertionPoint(
+                    it.getInt(STATE_LINK_INSERTION_VIEW_ID),
+                    it.getInt(STATE_LINK_INSERTION_START),
+                    it.getInt(STATE_LINK_INSERTION_END)
+                )
+            } else {
+                null
+            }
+        }
+
         sharedMainActivityViewModel = ViewModelProvider(requireActivity())[SharedMainActivityViewModel::class.java]
 
         val factory = NoteViewModelFactory.getInstance(dataRepository, noteInitialData)
@@ -173,6 +192,17 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         if (BuildConfig.LOG_DEBUG) LogUtils.d(TAG, savedInstanceState)
 
         setupObservers()
+
+        childFragmentManager.setFragmentResultListener(
+            LinkTargetPickerFragment.REQUEST_KEY,
+            viewLifecycleOwner
+        ) { _, result ->
+            onLinkTargetSelected(
+                result.getLong(LinkTargetPickerFragment.RESULT_NOTE_ID),
+                result.getString(LinkTargetPickerFragment.RESULT_TITLE).orEmpty(),
+                result.getString(LinkTargetPickerFragment.RESULT_ID).orEmpty()
+            )
+        }
 
         binding.title.apply {
             // Keyboard's action button pressed
@@ -272,9 +302,11 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
     // Show/hide "insert timestamp" button
     override fun onEditMode() {
         binding.topToolbar.menu.findItem(R.id.insert_inline_timestamp).isVisible = true
+        binding.topToolbar.menu.findItem(R.id.insert_link).isVisible = true
     }
     override fun onViewMode() {
         binding.topToolbar.menu.findItem(R.id.insert_inline_timestamp).isVisible = false
+        binding.topToolbar.menu.findItem(R.id.insert_link).isVisible = false
     }
 
     private fun topToolbarToViewMode() {
@@ -431,10 +463,78 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
                     null)
                     .show(childFragmentManager, TimestampDialogFragment.FRAGMENT_TAG)
             }
+
+            R.id.insert_link -> {
+                openLinkTargetPicker()
+            }
         }
 
         // Handled
         return true
+    }
+
+    private fun openLinkTargetPicker() {
+        linkInsertionPoint = captureLinkInsertionPoint()
+        LinkTargetPickerFragment().show(
+            childFragmentManager,
+            LinkTargetPickerFragment.FRAGMENT_TAG
+        )
+    }
+
+    private fun captureLinkInsertionPoint(): LinkInsertionPoint {
+        val focusedViewId = view?.findFocus()?.id
+        val viewId = when {
+            focusedViewId == R.id.title_edit -> R.id.title_edit
+            focusedViewId == R.id.content_edit -> R.id.content_edit
+            binding.content.isBeingEdited() -> R.id.content_edit
+            binding.title.isBeingEdited() -> R.id.title_edit
+            else -> R.id.content_edit
+        }
+        val editor = view?.findViewById<RichTextEdit>(viewId)
+        val textLength = editor?.text?.length ?: 0
+        val start = (editor?.selectionStart ?: textLength).coerceIn(0, textLength)
+        val end = (editor?.selectionEnd ?: start).coerceIn(start, textLength)
+
+        return LinkInsertionPoint(viewId, start, end)
+    }
+
+    private fun onLinkTargetSelected(noteId: Long, title: String, id: String) {
+        if (id.isBlank()) return
+
+        if (noteId == viewModel.noteId) {
+            setCurrentNoteIdProperty(id)
+        }
+
+        val insertionPoint = linkInsertionPoint ?: captureLinkInsertionPoint()
+        val targetView = when (insertionPoint.viewId) {
+            R.id.title_edit -> binding.title
+            else -> binding.content
+        }
+        targetView.insertStringAtPosition(
+            insertionPoint.start,
+            insertionPoint.end,
+            IdLinkFormatter.format(id, title)
+        )
+        linkInsertionPoint = null
+
+        // Keep the in-memory payload (especially a self-link's newly added ID) in sync with
+        // the editor before a later metadata action or a configuration change saves it.
+        updatePayloadFromViews()
+    }
+
+    /** The picker persists the target ID; mirror it in this editor if the target is this note. */
+    private fun setCurrentNoteIdProperty(id: String) {
+        for (index in 0 until binding.propertiesContainer.childCount) {
+            val property = binding.propertiesContainer.getChildAt(index)
+            val name = property.findViewById<TextView>(R.id.name)
+            if (name.text.toString().equals(IdLinkSpan.PROPERTY, ignoreCase = true)) {
+                property.findViewById<EditText>(R.id.value).setText(id)
+                return
+            }
+        }
+
+        addPropertyToList(IdLinkSpan.PROPERTY, id)
+        setMetadataViewsVisibility()
     }
 
     private fun isNoteContentFolded(): Boolean {
@@ -764,6 +864,12 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         }
 
         viewModel.savePayloadToBundle(outState)
+
+        linkInsertionPoint?.let { point ->
+            outState.putInt(STATE_LINK_INSERTION_VIEW_ID, point.viewId)
+            outState.putInt(STATE_LINK_INSERTION_START, point.start)
+            outState.putInt(STATE_LINK_INSERTION_END, point.end)
+        }
     }
 
     override fun onDetach() {
@@ -1226,6 +1332,10 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         /** Name used for [android.app.FragmentManager].  */
         @JvmField
         val FRAGMENT_TAG: String = NoteFragment::class.java.name
+
+        private const val STATE_LINK_INSERTION_VIEW_ID = "link_insertion_view_id"
+        private const val STATE_LINK_INSERTION_START = "link_insertion_start"
+        private const val STATE_LINK_INSERTION_END = "link_insertion_end"
 
         private const val ARG_BOOK_ID = "book_id"
         private const val ARG_NOTE_ID = "note_id"

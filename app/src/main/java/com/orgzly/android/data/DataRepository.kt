@@ -43,6 +43,7 @@ import com.orgzly.android.ui.NotePlace
 import com.orgzly.android.ui.Place
 import com.orgzly.android.ui.note.NoteBuilder
 import com.orgzly.android.ui.note.NotePayload
+import com.orgzly.android.ui.views.style.IdLinkSpan
 import com.orgzly.android.usecase.RepoCreate
 import com.orgzly.android.util.*
 import com.orgzly.org.OrgActiveTimestamps
@@ -1271,6 +1272,11 @@ class DataRepository @Inject constructor(
         return db.noteView().getAllWithScheduledOrDeadline()
     }
 
+    /** All non-root, non-clipboard notes that can be used as an org ID-link target. */
+    fun getAllLinkableNoteViews(): List<NoteView> {
+        return db.noteView().getAll().filter { it.note.isCut == 0L }
+    }
+
     fun getVisibleNotesLiveData(bookId: Long, noteId: Long? = null): LiveData<List<NoteView>> {
         if (BuildConfig.LOG_DEBUG) LogUtils.d(TAG, "bookId=$bookId, noteId=$noteId")
 
@@ -1363,6 +1369,29 @@ class DataRepository @Inject constructor(
 
     fun getNoteProperties(noteId: Long): List<NoteProperty> {
         return db.noteProperty().get(noteId)
+    }
+
+    /**
+     * Returns the note's existing ID, or persists a UUID ID property before returning it.
+     * Updating through [updateNote] keeps the normal note-property, event and modified-book
+     * bookkeeping in one place.
+     */
+    fun getOrCreateNoteId(noteId: Long): String? {
+        return db.runInTransaction(Callable {
+            val notePayload = getNotePayload(noteId) ?: return@Callable null
+            val idProperty = notePayload.properties.all.firstOrNull {
+                it.name.equals(IdLinkSpan.PROPERTY, ignoreCase = true)
+            }
+            val id = idProperty?.value?.takeIf { it.isNotBlank() }
+                ?: UUID.randomUUID().toString()
+
+            if (idProperty?.value != id) {
+                notePayload.properties.put(idProperty?.name ?: IdLinkSpan.PROPERTY, id)
+                updateNote(noteId, notePayload)
+            }
+
+            id
+        })
     }
 
     fun getNotePropertyNames(): List<String> {
