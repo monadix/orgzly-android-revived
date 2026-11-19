@@ -4,6 +4,8 @@
     <string name="settings">Settings</string>
     <string name="sortnote">Sort note</string>
     <string name="insert_timestamp">Insert timestamp</string>
+    <string name="insert_link">Insert link</string>
+    <string name="no_link_targets_found">No matching note targets</string>
     <string name="ok">OK</string>
     <string name="yes">Yes</string>
     <string name="unlink">Unlink</string> <!-- Unlink from Dropbox -->

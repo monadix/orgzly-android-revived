@@ -237,6 +237,24 @@ class RichText(context: Context, attrs: AttributeSet?) :
         }
     }
 
+    /** Insert at a previously captured selection and return the field to edit mode. */
+    fun insertStringAtPosition(start: Int, end: Int, string: String) {
+        val view = richTextEdit
+        val length = view.text?.length ?: return
+        val safeStart = start.coerceIn(0, length)
+        val safeEnd = end.coerceIn(safeStart, length)
+        val cursor = safeStart + string.length
+
+        view.text?.replace(safeStart, safeEnd, string)
+
+        if (view.isVisible) {
+            view.requestFocus()
+            view.setSelection(cursor)
+        } else {
+            toEditMode(cursor)
+        }
+    }
+
     fun isBeingEdited(): Boolean {
         return this.richTextEdit.isVisible
     }
