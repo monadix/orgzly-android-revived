@@ -45,9 +45,9 @@ class LinkTargetPickerFragment : DialogFragment() {
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
-        MaterialAlertDialogBuilder(requireContext(), theme).create().apply {
-            window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
+        // AlertDialog installs its own content the first time it is shown. Show it before
+        // DialogFragment attaches our view so that installation cannot replace the picker.
+        MaterialAlertDialogBuilder(requireContext(), theme).show()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -106,6 +106,11 @@ class LinkTargetPickerFragment : DialogFragment() {
         }
 
         viewModel.load()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        requireDialog().window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
 
     override fun onResume() {
