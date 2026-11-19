@@ -8,6 +8,7 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
@@ -44,7 +45,9 @@ class LinkTargetPickerFragment : DialogFragment() {
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
-        MaterialAlertDialogBuilder(requireContext(), theme).show()
+        MaterialAlertDialogBuilder(requireContext(), theme).create().apply {
+            window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
 
     override fun onCreateView(
         inflater: LayoutInflater,
