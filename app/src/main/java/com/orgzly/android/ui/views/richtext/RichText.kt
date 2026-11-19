@@ -54,7 +54,7 @@ class RichText(context: Context, attrs: AttributeSet?) :
     }
 
     private val sourceBackgroundColor: Int by lazy {
-        context.styledAttributes(intArrayOf(R.attr.colorSecondaryContainer)) { typedArray ->
+        context.styledAttributes(intArrayOf(com.google.android.material.R.attr.colorSecondaryContainer)) { typedArray ->
             typedArray.getColor(0, 0)
         }
     }
@@ -234,6 +234,24 @@ class RichText(context: Context, attrs: AttributeSet?) :
         val view = this.richTextEdit
         if (view.isVisible) {
             view.text?.replace(view.selectionStart, view.selectionEnd, string)
+        }
+    }
+
+    /** Insert at a previously captured selection and return the field to edit mode. */
+    fun insertStringAtPosition(start: Int, end: Int, string: String) {
+        val view = richTextEdit
+        val length = view.text?.length ?: return
+        val safeStart = start.coerceIn(0, length)
+        val safeEnd = end.coerceIn(safeStart, length)
+        val cursor = safeStart + string.length
+
+        view.text?.replace(safeStart, safeEnd, string)
+
+        if (view.isVisible) {
+            view.requestFocus()
+            view.setSelection(cursor)
+        } else {
+            toEditMode(cursor)
         }
     }
 

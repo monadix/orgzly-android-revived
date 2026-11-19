@@ -18,6 +18,12 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/insert_link"
+        android:title="@string/insert_link"
+        android:visible="false"
+        app:showAsAction="ifRoom" />
+
+    <item
         android:id="@+id/clock"
         android:icon="@drawable/ic_hourglass_empty"
         app:showAsAction="never"

@@ -1,17 +1,14 @@
 package com.orgzly.android.ui.notes.book
 
 import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
 import android.view.*
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -24,13 +21,14 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.orgzly.BuildConfig
 import com.orgzly.R
 import com.orgzly.android.App
-import com.orgzly.android.AppIntent
 import com.orgzly.android.BookUtils
+import com.orgzly.android.data.LogDonePolicy
 import com.orgzly.android.db.NotesClipboard
 import com.orgzly.android.db.entity.Book
 import com.orgzly.android.db.entity.NoteView
 import com.orgzly.android.prefs.AppPreferences
 import com.orgzly.android.query.Condition
+import com.orgzly.org.utils.LogDone
 import com.orgzly.android.query.Query
 import com.orgzly.android.query.SimpleFilter
 import com.orgzly.android.query.user.InternalQueryBuilder
@@ -57,6 +55,7 @@ import com.orgzly.android.ui.capture.CaptureTemplateResolver
 import com.orgzly.android.ui.capture.getDisplayName
 import com.orgzly.android.ui.capture.normalizeHeadlinePath
 import com.orgzly.android.ui.settings.SettingsActivity
+import com.orgzly.android.ui.showSnackbar
 import com.orgzly.android.ui.util.ActivityUtils
 import com.orgzly.android.ui.util.setDecorFitsSystemWindowsForBottomToolbar
 import com.orgzly.android.ui.util.setup
@@ -95,7 +94,7 @@ class BookFragment :
 
     private lateinit var sharedMainActivityViewModel: SharedMainActivityViewModel
 
-    private lateinit var viewModel: BookViewModel
+    override lateinit var viewModel: BookViewModel
 
     @Inject lateinit var simpleFilterMapper: SimpleFilterMapper
     @Inject lateinit var queryBuilder: InternalQueryBuilder
@@ -104,20 +103,8 @@ class BookFragment :
 
     private var jumpButtonDirection = ScrollDirection.DOWN
 
-    private val clipboardChangedReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (::viewAdapter.isInitialized) {
-                viewAdapter.notifyDataSetChanged()
-            }
-        }
-    }
-
     override fun getAdapter(): BookAdapter? {
         return if (::viewAdapter.isInitialized) viewAdapter else null
-    }
-
-    override fun getCurrentListener(): NotesFragment.Listener? {
-        return listener
     }
 
     // TODO: Move to ViewModel
@@ -225,10 +212,6 @@ class BookFragment :
             setupJumpToEndButton(rv)
         }
 
-        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(
-                clipboardChangedReceiver,
-                IntentFilter(AppIntent.ACTION_CLIPBOARD_CHANGED))
-
         binding.swipeContainer.setup()
 
         viewModel.flipperDisplayedChild.observe(viewLifecycleOwner, Observer { child ->
@@ -274,25 +257,58 @@ class BookFragment :
         })
 
         viewModel.refileRequestEvent.observeSingle(viewLifecycleOwner, Observer {
-            RefileFragment.getInstance(it.selected, it.count)
+            RefileFragment.getInstance(it.selected, it.count, it.titlePreview)
                     .show(childFragmentManager, RefileFragment.FRAGMENT_TAG)
         })
 
-        viewModel.notesDeleteRequest.observeSingle(viewLifecycleOwner, Observer { pair ->
-            val ids = pair.first
-            val count = pair.second
+        viewModel.notesDeleteRequest.observeSingle(viewLifecycleOwner, Observer { request ->
+            val ids = request.selected
+            val count = request.count
 
             val question = resources.getQuantityString(
                     R.plurals.delete_note_or_notes_with_count_question, count, count)
 
             dialog = MaterialAlertDialogBuilder(requireContext())
                     .setTitle(question)
+                    .setMessage(request.titlePreview?.ifBlank { getString(R.string.untitled_note) })
                     .setPositiveButton(R.string.delete) { _, _ ->
-                        listener?.onNotesDeleteRequest(mBookId, ids)
+                        viewModel.deleteNotes(ids)
                     }
                     .setNegativeButton(R.string.cancel) { _, _ -> }
                     .show()
         })
+
+        viewModel.events.observeSingle(viewLifecycleOwner) { event ->
+            val message = when (event) {
+                is BookEvent.ClipboardCut ->
+                    if (event.count == 0) {
+                        getString(R.string.no_notes_cut)
+                    } else {
+                        resources.getQuantityString(R.plurals.notes_cut, event.count, event.count)
+                    }
+
+                is BookEvent.ClipboardCopied ->
+                    if (event.count > 0) {
+                        resources.getQuantityString(R.plurals.notes_copied, event.count, event.count)
+                    } else {
+                        null
+                    }
+
+                is BookEvent.ClipboardPasted ->
+                    if (event.count > 0) {
+                        resources.getQuantityString(R.plurals.notes_pasted, event.count, event.count)
+                    } else {
+                        getString(R.string.no_notes_pasted)
+                    }
+            }
+
+            if (message != null) {
+                activity?.showSnackbar(message)
+            }
+
+            // Notes shown as cut have changed
+            viewAdapter.notifyDataSetChanged()
+        }
 
         viewModel.appBar.mode.observeSingle(viewLifecycleOwner) { mode ->
             when (mode) {
@@ -387,8 +403,6 @@ class BookFragment :
     }
 
     override fun onDestroyView() {
-        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(clipboardChangedReceiver)
-
         super.onDestroyView()
 
         if (BuildConfig.LOG_DEBUG) LogUtils.d(TAG)
@@ -474,7 +488,7 @@ class BookFragment :
             return
         }
 
-        listener?.onNotesMoveRequest(mBookId, viewAdapter.getSelection().getIds(), offset)
+        viewModel.moveNotes(viewAdapter.getSelection().getIds(), offset)
     }
 
     /**
@@ -484,7 +498,7 @@ class BookFragment :
     private fun pasteNotes(place: Place, noteId: Long) {
         viewAdapter.clearSelection()
 
-        listener?.onNotesPasteRequest(mBookId, noteId, place)
+        viewModel.pasteNotes(noteId, place)
     }
 
     fun scrollToNoteIfSet(noteId: Long) {
@@ -530,7 +544,7 @@ class BookFragment :
 
     @SuppressLint("ClickableViewAccessibility")
     private fun highlightScrolledToView(view: View) {
-        val selectionBgColor = view.context.styledAttributes(intArrayOf(R.attr.colorSurface)) { typedArray ->
+        val selectionBgColor = view.context.styledAttributes(intArrayOf(com.google.android.material.R.attr.colorSurface)) { typedArray ->
             typedArray.getColor(0, 0)
         }
 
@@ -638,7 +652,38 @@ class BookFragment :
             .setPositiveButton(R.string.set) { _, _ ->
                 val newTagsText = input.text.toString().trim()
                 val newPreface = updateFiletagsInPreface(book.preface, newTagsText)
-                listener?.onBookPrefaceUpdate(mBookId, newPreface)
+                viewModel.updatePreface(newPreface)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showClosedTimeDialog() {
+        val book = currentBook ?: return
+
+        val current = LogDonePolicy.fromPreface(book.preface)
+
+        // The picker cannot offer lognotedone, so it shows as "record" and is kept as it is.
+        val choices = arrayOf(
+            null,
+            if (current == LogDone.NOTE) LogDone.NOTE else LogDone.TIME,
+            LogDone.NONE)
+
+        val labels = arrayOf(
+            getString(R.string.closed_time_use_app_setting),
+            getString(R.string.closed_time_record),
+            getString(R.string.closed_time_do_not_record))
+
+        val checked = choices.indexOf(current)
+
+        var selected = checked
+
+        dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.closed_time)
+            .setSingleChoiceItems(labels, checked) { _, which -> selected = which }
+            .setPositiveButton(R.string.set) { _, _ ->
+                viewModel.updatePreface(
+                    LogDonePolicy.withLogDoneInPreface(book.preface, choices[selected]))
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -696,6 +741,7 @@ class BookFragment :
             if (currentBook == null) {
                 menu.removeItem(R.id.books_options_menu_book_preface)
                 menu.removeItem(R.id.books_options_menu_book_filetags)
+                menu.removeItem(R.id.books_options_menu_book_closed_time)
             }
 
             // Show/hide widen button based on narrowed state
@@ -941,12 +987,12 @@ class BookFragment :
             }
 
             R.id.cut -> {
-                listener?.onNotesCutRequest(mBookId, ids)
+                viewModel.cutNotes(ids)
                 viewModel.appBar.toMode(APP_BAR_DEFAULT_MODE)
             }
 
             R.id.copy -> {
-                listener?.onNotesCopyRequest(mBookId, ids)
+                viewModel.copyNotes(ids)
                 viewModel.appBar.toMode(APP_BAR_DEFAULT_MODE)
             }
 
@@ -976,35 +1022,33 @@ class BookFragment :
                 moveNotes(1)
 
             R.id.notes_action_move_left ->
-                listener?.onNotesPromoteRequest(ids)
+                viewModel.promoteNotes(ids)
 
             R.id.notes_action_move_right ->
-                listener?.onNotesDemoteRequest(ids)
+                viewModel.demoteNotes(ids)
 
             R.id.note_popup_set_state,
             R.id.state ->
-                listener?.let {
-                    openNoteStateDialog(it, ids, null)
-                }
+                openNoteStateDialog(ids, null)
 
             R.id.note_popup_toggle_state,
             R.id.toggle_state -> {
-                listener?.onStateToggleRequest(ids)
+                viewModel.toggleState(ids)
             }
 
             R.id.note_popup_clock_in,
             R.id.clock_in -> {
-                listener?.onClockIn(ids)
+                viewModel.clockIn(ids)
             }
 
             R.id.note_popup_clock_out,
             R.id.clock_out -> {
-                listener?.onClockOut(ids)
+                viewModel.clockOut(ids)
             }
 
             R.id.note_popup_clock_cancel,
             R.id.clock_cancel -> {
-                listener?.onClockCancel(ids)
+                viewModel.clockCancel(ids)
             }
 
             R.id.note_popup_focus,
@@ -1038,6 +1082,10 @@ class BookFragment :
 
             R.id.books_options_menu_book_filetags -> {
                 showFiletagsDialog()
+            }
+
+            R.id.books_options_menu_book_closed_time -> {
+                showClosedTimeDialog()
             }
 
             R.id.keep_screen_on -> {
@@ -1163,19 +1211,6 @@ class BookFragment :
 
     interface Listener : NotesFragment.Listener {
         fun onBookPrefaceEditRequest(book: Book)
-
-        fun onBookPrefaceUpdate(bookId: Long, preface: String)
-
-        fun onNotesDeleteRequest(bookId: Long, noteIds: Set<Long>)
-
-        fun onNotesCutRequest(bookId: Long, noteIds: Set<Long>)
-        fun onNotesCopyRequest(bookId: Long, noteIds: Set<Long>)
-        fun onNotesPasteRequest(bookId: Long, noteId: Long, place: Place)
-
-        fun onNotesPromoteRequest(noteIds: Set<Long>)
-        fun onNotesDemoteRequest(noteIds: Set<Long>)
-
-        fun onNotesMoveRequest(bookId: Long, noteIds: Set<Long>, offset: Int)
     }
 
     companion object {

@@ -16,7 +16,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.EditText
 import android.widget.TextView
@@ -48,6 +47,8 @@ import com.orgzly.android.ui.dialogs.TimestampDialogFragment
 import com.orgzly.android.ui.drawer.DrawerItem
 import com.orgzly.android.ui.main.MainActivity
 import com.orgzly.android.ui.main.SharedMainActivityViewModel
+import com.orgzly.android.ui.note.links.IdLinkFormatter
+import com.orgzly.android.ui.note.links.LinkTargetPickerFragment
 import com.orgzly.android.ui.notes.book.BookFragment
 import com.orgzly.android.ui.settings.SettingsActivity
 import com.orgzly.android.ui.share.ShareActivity
@@ -61,9 +62,9 @@ import com.orgzly.android.ui.util.invisibleIf
 import com.orgzly.android.ui.util.invisibleUnless
 import com.orgzly.android.ui.views.richtext.RichText
 import com.orgzly.android.ui.views.richtext.RichTextEdit
+import com.orgzly.android.ui.views.style.IdLinkSpan
 import com.orgzly.android.util.LogUtils
 import com.orgzly.android.util.OrgFormatter
-import com.orgzly.android.util.SpaceTokenizer
 import com.orgzly.android.util.UserTimeFormatter
 import com.orgzly.databinding.FragmentNoteBinding
 import com.orgzly.org.OrgProperties
@@ -91,11 +92,23 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
     private var dialog: AlertDialog? = null
 
+    private var tagsPopup: NoteTagsPopup? = null
+
+    private var knownTags: List<String> = emptyList()
+
     private lateinit var sharedMainActivityViewModel: SharedMainActivityViewModel
+
+    private data class LinkInsertionPoint(val viewId: Int, val start: Int, val end: Int)
+
+    private var linkInsertionPoint: LinkInsertionPoint? = null
 
     private val userCancelBackPressHandler = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
-            userCancel()
+            if (tagsPopup?.isShowing == true) {
+                tagsPopup?.dismiss()
+            } else {
+                userCancel()
+            }
         }
     }
 
@@ -150,6 +163,18 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
         val noteInitialData = noteInitialDataFromArguments()
 
+        linkInsertionPoint = savedInstanceState?.let {
+            if (it.containsKey(STATE_LINK_INSERTION_VIEW_ID)) {
+                LinkInsertionPoint(
+                    it.getInt(STATE_LINK_INSERTION_VIEW_ID),
+                    it.getInt(STATE_LINK_INSERTION_START),
+                    it.getInt(STATE_LINK_INSERTION_END)
+                )
+            } else {
+                null
+            }
+        }
+
         sharedMainActivityViewModel = ViewModelProvider(requireActivity())[SharedMainActivityViewModel::class.java]
 
         val factory = NoteViewModelFactory.getInstance(dataRepository, noteInitialData)
@@ -174,6 +199,17 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
         setupObservers()
 
+        childFragmentManager.setFragmentResultListener(
+            LinkTargetPickerFragment.REQUEST_KEY,
+            viewLifecycleOwner
+        ) { _, result ->
+            onLinkTargetSelected(
+                result.getLong(LinkTargetPickerFragment.RESULT_NOTE_ID),
+                result.getString(LinkTargetPickerFragment.RESULT_TITLE).orEmpty(),
+                result.getString(LinkTargetPickerFragment.RESULT_ID).orEmpty()
+            )
+        }
+
         binding.title.apply {
             // Keyboard's action button pressed
             setOnEditorActionListener { _, _, _ ->
@@ -193,24 +229,13 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
             binding.locationContainer.visibility = View.GONE
         }
 
-        // Hide remove button if there are no tags
-        binding.tagsButton.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(s: CharSequence, start: Int, before: Int, count: Int) {
-                binding.tagsRemove.goneIf(TextUtils.isEmpty(binding.tagsButton.text))
-            }
-
-            override fun afterTextChanged(s: Editable) {}
-        })
-
-        binding.tagsMenu.setOnClickListener {
-            binding.tagsButton.showDropDown()
+        binding.tagsButton.setOnClickListener { showTagsMenu() }
+        binding.tagsContainer.setOnClickListener { showTagsMenu() }
+        binding.tagsRemove.setOnClickListener {
+            viewModel.updatePayloadTags(emptyList())
+            setTagsView(emptyList())
         }
-
-        binding.tagsRemove.setOnClickListener(this)
-
-        setupTagsViewAdapter()
+        setupKnownTags()
 
         binding.priorityButton.setOnClickListener(this)
         binding.priorityRemove.setOnClickListener(this)
@@ -272,9 +297,11 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
     // Show/hide "insert timestamp" button
     override fun onEditMode() {
         binding.topToolbar.menu.findItem(R.id.insert_inline_timestamp).isVisible = true
+        binding.topToolbar.menu.findItem(R.id.insert_link).isVisible = true
     }
     override fun onViewMode() {
         binding.topToolbar.menu.findItem(R.id.insert_inline_timestamp).isVisible = false
+        binding.topToolbar.menu.findItem(R.id.insert_link).isVisible = false
     }
 
     private fun topToolbarToViewMode() {
@@ -431,10 +458,84 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
                     null)
                     .show(childFragmentManager, TimestampDialogFragment.FRAGMENT_TAG)
             }
+
+            R.id.insert_link -> {
+                openLinkTargetPicker()
+            }
         }
 
         // Handled
         return true
+    }
+
+    private fun openLinkTargetPicker() {
+        linkInsertionPoint = captureLinkInsertionPoint()
+
+        // The editor can still own the IME while the picker dialog is being attached.
+        // End that session first; the picker requests focus for its search field once its
+        // own window is ready.
+        KeyboardUtils.closeSoftKeyboard(activity)
+
+        LinkTargetPickerFragment().show(
+            childFragmentManager,
+            LinkTargetPickerFragment.FRAGMENT_TAG
+        )
+    }
+
+    private fun captureLinkInsertionPoint(): LinkInsertionPoint {
+        val focusedViewId = view?.findFocus()?.id
+        val viewId = when {
+            focusedViewId == R.id.title_edit -> R.id.title_edit
+            focusedViewId == R.id.content_edit -> R.id.content_edit
+            binding.content.isBeingEdited() -> R.id.content_edit
+            binding.title.isBeingEdited() -> R.id.title_edit
+            else -> R.id.content_edit
+        }
+        val editor = view?.findViewById<RichTextEdit>(viewId)
+        val textLength = editor?.text?.length ?: 0
+        val start = (editor?.selectionStart ?: textLength).coerceIn(0, textLength)
+        val end = (editor?.selectionEnd ?: start).coerceIn(start, textLength)
+
+        return LinkInsertionPoint(viewId, start, end)
+    }
+
+    private fun onLinkTargetSelected(noteId: Long, title: String, id: String) {
+        if (id.isBlank()) return
+
+        if (noteId == viewModel.noteId) {
+            setCurrentNoteIdProperty(id)
+        }
+
+        val insertionPoint = linkInsertionPoint ?: captureLinkInsertionPoint()
+        val targetView = when (insertionPoint.viewId) {
+            R.id.title_edit -> binding.title
+            else -> binding.content
+        }
+        targetView.insertStringAtPosition(
+            insertionPoint.start,
+            insertionPoint.end,
+            IdLinkFormatter.format(id, title)
+        )
+        linkInsertionPoint = null
+
+        // Keep the in-memory payload (especially a self-link's newly added ID) in sync with
+        // the editor before a later metadata action or a configuration change saves it.
+        updatePayloadFromViews()
+    }
+
+    /** The picker persists the target ID; mirror it in this editor if the target is this note. */
+    private fun setCurrentNoteIdProperty(id: String) {
+        for (index in 0 until binding.propertiesContainer.childCount) {
+            val property = binding.propertiesContainer.getChildAt(index)
+            val name = property.findViewById<TextView>(R.id.name)
+            if (name.text.toString().equals(IdLinkSpan.PROPERTY, ignoreCase = true)) {
+                property.findViewById<EditText>(R.id.value).setText(id)
+                return
+            }
+        }
+
+        addPropertyToList(IdLinkSpan.PROPERTY, id)
+        setMetadataViewsVisibility()
     }
 
     private fun isNoteContentFolded(): Boolean {
@@ -516,11 +617,7 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         binding.title.setSourceText(payload.title)
 
         // Tags
-        if (payload.tags.isNotEmpty()) {
-            binding.tagsButton.setText(TextUtils.join(" ", payload.tags))
-        } else {
-            binding.tagsButton.text = null
-        }
+        setTagsView(payload.tags)
 
         // Times
         updateTimestampView(TimeType.SCHEDULED, OrgRange.parseOrNull(payload.scheduled))
@@ -644,8 +741,7 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         else
             binding.priorityButton.text.toString()
 
-        val tags = binding.tagsButton.text.toString()
-            .split("\\s+".toRegex()).dropLastWhile { it.isEmpty() }
+        val tags = viewModel.notePayload?.tags.orEmpty()
 
         viewModel.updatePayload(title, content, state, priority, tags, properties)
 
@@ -716,17 +812,28 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         viewModel.loadData()
     }
 
-    /**
-     * Set adapter for tags view for auto-complete.
-     */
-    private fun setupTagsViewAdapter() {
+    private fun setupKnownTags() {
         viewModel.tags.observe(viewLifecycleOwner, Observer { tags ->
-            context?.let {
-                val adapter = ArrayAdapter(it, R.layout.dropdown_item, tags)
-                binding.tagsButton.setAdapter(adapter)
-                binding.tagsButton.setTokenizer(SpaceTokenizer())
-            }
+            knownTags = tags
         })
+    }
+
+    private fun setTagsView(tags: List<String>) {
+        binding.tagsButton.tags = tags
+        binding.tagsRemove.goneUnless(tags.isNotEmpty())
+    }
+
+    private fun showTagsMenu() {
+        val payload = viewModel.notePayload ?: return
+
+        binding.note.requestFocus()
+        tagsPopup?.dismiss()
+        tagsPopup = NoteTagsPopup(requireContext(), knownTags, payload.tags) { tags ->
+            viewModel.updatePayloadTags(tags)
+            setTagsView(tags)
+        }.also {
+            it.show(binding.tagsButton)
+        }
     }
 
     override fun onResume() {
@@ -742,6 +849,8 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
         dialog?.dismiss()
         dialog = null
+        tagsPopup?.dismiss()
+        tagsPopup = null
 
         ActivityUtils.keepScreenOnClear(activity)
     }
@@ -751,6 +860,8 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
 
         if (BuildConfig.LOG_DEBUG) LogUtils.d(TAG)
 
+        tagsPopup?.dismiss()
+        tagsPopup = null
         binding.viewFlipper.displayedChild = 0
     }
 
@@ -764,6 +875,12 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         }
 
         viewModel.savePayloadToBundle(outState)
+
+        linkInsertionPoint?.let { point ->
+            outState.putInt(STATE_LINK_INSERTION_VIEW_ID, point.viewId)
+            outState.putInt(STATE_LINK_INSERTION_START, point.start)
+            outState.putInt(STATE_LINK_INSERTION_END, point.end)
+        }
     }
 
     override fun onDetach() {
@@ -822,10 +939,6 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         when (view.id) {
             R.id.location_button -> {
                 viewModel.requestNoteBookChange()
-            }
-
-            R.id.tags_remove -> {
-                binding.tagsButton.text = null
             }
 
             R.id.state_button -> {
@@ -999,7 +1112,7 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         setMetadataViewsVisibility(
             "tags",
             binding.tagsContainer,
-            !TextUtils.isEmpty(binding.tagsButton.text))
+            !viewModel.notePayload?.tags.isNullOrEmpty())
 
         setMetadataViewsVisibility(
             "state",
@@ -1226,6 +1339,10 @@ class NoteFragment : CommonFragment(), View.OnClickListener, TimestampDialogFrag
         /** Name used for [android.app.FragmentManager].  */
         @JvmField
         val FRAGMENT_TAG: String = NoteFragment::class.java.name
+
+        private const val STATE_LINK_INSERTION_VIEW_ID = "link_insertion_view_id"
+        private const val STATE_LINK_INSERTION_START = "link_insertion_start"
+        private const val STATE_LINK_INSERTION_END = "link_insertion_end"
 
         private const val ARG_BOOK_ID = "book_id"
         private const val ARG_NOTE_ID = "note_id"

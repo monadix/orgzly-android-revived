@@ -4,6 +4,8 @@
     <string name="settings">Settings</string>
     <string name="sortnote">Sort note</string>
     <string name="insert_timestamp">Insert timestamp</string>
+    <string name="insert_link">Insert link</string>
+    <string name="no_link_targets_found">No matching note targets</string>
     <string name="ok">OK</string>
     <string name="yes">Yes</string>
     <string name="unlink">Unlink</string> <!-- Unlink from Dropbox -->
@@ -191,7 +193,7 @@
     <!-- TODO: I don't think we can say more than this for ssh authentication failures, but we probably want to -->
     <string name="git_clone_error_public_external_storage">This path is not supported on Android 11+. Use app storage instead, e.g.: %1$s</string>
     <string name="git_clone_error_invalid_repo">The remote address is not a git repo</string>
-    <string name="git_clone_error_invalid_target_dir">The target directory does not exist</string>
+    <string name="git_clone_error_invalid_target_dir">The target directory could not be created</string>
     <string name="git_clone_error_target_not_empty">The target directory is not empty</string>
     <string name="git_clone_error_uri_not_supported">The remote address is not supported</string>
     <string name="git_sync_error_failed_set_marker_branch">Failed to update marker branch</string>
@@ -344,8 +346,24 @@
     <string name="hour">Hour</string>
     <string name="day">Day</string>
     <string name="week">Week</string>
+    <string name="two_weeks">Two weeks</string>
     <string name="month">Month</string>
     <string name="year">Year</string>
+
+    <string name="calendar">Calendar</string>
+    <string name="calendar_view">Calendar view</string>
+
+    <string name="previous_month">Previous month</string>
+    <string name="next_month">Next month</string>
+
+    <string name="default_agenda_view">Default agenda view</string>
+    <string name="calendar_views">Calendar views</string>
+    <string name="calendar_text_size">Calendar text size</string>
+
+    <string name="calendar_show_book_name">Show notebook name in calendar</string>
+
+    <string name="monday">Monday</string>
+    <string name="sunday">Sunday</string>
 
     <string name="repeater_dialog_title">Repeat</string>
     <string name="repeater_description">After task is marked complete, repeater will shift the time</string>
@@ -395,6 +413,8 @@
 
     <string name="notebooks_sort_order_name">Name</string>
     <string name="notebooks_sort_order_modification_time">Modification time</string>
+
+    <string name="untitled_note">(Untitled note)</string>
 
     <plurals name="delete_note_or_notes_with_count_question">
         <item quantity="one">Delete note?</item>
@@ -464,6 +484,10 @@
 
     <string name="edit_book_preface">Edit preface</string>
     <string name="file_tags">Tags</string>
+    <string name="closed_time">Closed time</string>
+    <string name="closed_time_use_app_setting">Use app setting</string>
+    <string name="closed_time_record">Record closed time</string>
+    <string name="closed_time_do_not_record">Don\'t record closed time</string>
     <string name="book_preface_hint">Text displayed before the first note</string>
 
     <string name="keep_screen_on_title">Enable option to keep the screen on</string>
@@ -581,6 +605,8 @@
     <string name="overwrite_remote_notebook_question">Overwrite remote notebook(s)?</string>
     <string name="drawers_folded_by_default">Drawers folded</string>
     <string name="drawers_folded_by_default_summary">Fold drawers by default</string>
+    <string name="log_done">Record closed time</string>
+    <string name="log_done_summary">Add a CLOSED timestamp when a note is marked as done</string>
     <string name="log_on_time_shift">Log to drawer on time shift</string>
     <string name="log_on_time_shift_summary">Log time when note with repeater is marked as done</string>
     <string name="set_last_repeat_on_time_shift">Set property on time shift</string>
@@ -805,6 +831,8 @@
     <string name="template_name">Name</string>
     <string name="template_title">Title</string>
     <string name="template_content">Content</string>
+    <string name="template_properties">Properties</string>
+    <string name="template_properties_hint" formatted="false">One per line, e.g. CREATED: %U</string>
     <string name="template_tokens_hint" formatted="false">Tokens: %t %T (date/time) %u %U (inactive) %c (clipboard)</string>
     <string name="template_target">Target</string>
     <string name="template_select_target">Select target</string>
@@ -827,4 +855,9 @@
     <string name="template_headline_no_slash">Headline cannot contain \"/\"</string>
     <string name="template_headline_ambiguous">This headline is ambiguous (duplicate titles). Capture may target a different note.</string>
     <string name="external_files_access_is_no_longer_allowed">External files access is no longer allowed.</string>
+    <!-- Tags menu -->
+    <string name="no_tags_yet">No tags yet</string>
+    <string name="add_tag">Add tag “%1$s”</string>
+    <string name="select_tag_and_close">Select %1$s and close menu</string>
+    <string name="deselect_tag_and_close">Deselect %1$s and close menu</string>
 </resources>
